@@ -1,34 +1,15 @@
 import type { Session, Sighting } from "./types";
 
-// eBird Record Format columns (PRD §5.7)
-const HEADERS = [
-  "Common Name",
-  "Genus",
-  "Species",
-  "Number",
-  "Species Comments",
-  "Location Name",
-  "Latitude",
-  "Longitude",
-  "Date",
-  "Start Time",
-  "State",
-  "Country",
-  "Protocol",
-  "Number of Observers",
-  "Duration",
-  "All observations reported?",
-  "Effort Distance",
-  "Effort Area",
-  "Submission Comments"
-];
-
-function csvEscape(v: string | number | null | undefined): string {
-  if (v == null) return "";
-  const s = String(v);
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
+/**
+ * eBird Record Format (Extended) — no header row, no quotation marks.
+ * Column order: A Common Name, B Genus, C Species, D Species Count,
+ * E Species Comments, F Location Name, G Latitude, H Longitude,
+ * I Observation Date, J Start Time, K State, L Country, M Protocol,
+ * N Number of Observers, O Duration, P All Observations Reported?,
+ * Q Distance Covered, R Area Covered, S Checklist Comments.
+ *
+ * See https://support.ebird.org/en/support/solutions/articles/48000907878
+ */
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
@@ -49,6 +30,12 @@ function splitScientific(sci: string): { genus: string; species: string } {
   return { genus: parts[0] ?? "", species: parts.slice(1).join(" ") };
 }
 
+const PROTOCOL_MAP: Record<string, string> = {
+  stationary: "Stationary",
+  casual: "Incidental",
+  traveling: "Traveling"
+};
+
 export type ExportOpts = {
   locationName?: string;
   state?: string;
@@ -68,42 +55,44 @@ export function buildEbirdCsv(
     1,
     Math.round((end.getTime() - start.getTime()) / 60000)
   );
-  const protocol = opts.protocol ?? "stationary";
-  const locationName = opts.locationName ?? "Backyard";
+  const protocol = PROTOCOL_MAP[opts.protocol ?? "stationary"] ?? "Stationary";
+  const locationName = (opts.locationName ?? "Backyard").replace(/"/g, "");
   const state = opts.state ?? "";
   const country = opts.country ?? "US";
   const observers = opts.observers ?? 1;
+  const lat = session.lat != null ? String(session.lat) : "";
+  const lng = session.lng != null ? String(session.lng) : "";
 
+  // eBird requires no header row — first row must be a bird observation.
+  // eBird forbids quotation marks in the CSV.
   const rows: string[] = [];
-  rows.push(HEADERS.map(csvEscape).join(","));
 
   for (const s of sightings) {
     if (s.count <= 0) continue;
     const { genus, species } = splitScientific(s.scientific_name);
+    const commonName = s.common_name.replace(/"/g, "");
     rows.push(
       [
-        s.common_name,
-        genus,
-        species,
-        s.count,
-        "",
-        locationName,
-        session.lat ?? "",
-        session.lng ?? "",
-        fmtDate(start),
-        fmtTime(start),
-        state,
-        country,
-        protocol,
-        observers,
-        durationMin,
-        "Y",
-        "",
-        "",
-        ""
-      ]
-        .map(csvEscape)
-        .join(",")
+        commonName,        // A - Common Name
+        genus,             // B - Genus
+        species,           // C - Species
+        s.count,           // D - Species Count
+        "",                // E - Species Comments
+        locationName,      // F - Location Name
+        lat,               // G - Latitude
+        lng,               // H - Longitude
+        fmtDate(start),    // I - Observation Date
+        fmtTime(start),    // J - Start Time
+        state,             // K - State
+        country,           // L - Country
+        protocol,          // M - Protocol
+        observers,         // N - Number of Observers
+        durationMin,       // O - Duration (minutes)
+        "Y",               // P - All Observations Reported?
+        "",                // Q - Distance Covered
+        "",                // R - Area Covered
+        ""                 // S - Checklist Comments
+      ].join(",")
     );
   }
   return rows.join("\n");
